@@ -2985,5 +2985,35 @@ if(!CLOUD.on)seedIfEmpty();
 CUR=localStorage.getItem(SKEY)||'checkin';setStation(CUR);
 applyHeader();renderDash();updateSync(false);
 </script>
-</body>
+<script type="module">
+  import { initializeApp } from
+    "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
+
+  import {
+    getFirestore,
+    collection,
+    doc,
+    setDoc,
+    updateDoc,
+    getDoc,
+    onSnapshot,
+    serverTimestamp,
+    runTransaction
+  } from
+    "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "ใส่ค่าจาก Firebase",
+    authDomain: "ใส่ค่าจาก Firebase",
+    projectId: "ใส่ค่าจาก Firebase",
+    storageBucket: "ใส่ค่าจาก Firebase",
+    messagingSenderId: "ใส่ค่าจาก Firebase",
+    appId: "ใส่ค่าจาก Firebase"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  console.log("Firebase connected");
+</script></body>
 </html>
