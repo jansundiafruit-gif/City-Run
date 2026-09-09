@@ -2900,7 +2900,8 @@ function renderPart(){
       <div class="dots"><span class="sd checkin ${p.stCheckin?'on':''}"></span><span class="sd shirt ${p.stShirt?'on':''}"></span><span class="sd drink ${p.stDrink?'on':''}"></span></div>
       <div class="pinfo"><div class="nm">${esc(fullName(p))}</div><div class="mt">${esc(p.empId||'—')}${p.bu?' · '+esc(p.bu):''}${p.groupRunning?' · '+esc(p.groupRunning):''}${p.shirtSize?' · เสื้อ '+esc(p.shirtSize):''}${p.drink?' · '+esc(p.drink):''}</div></div>
       <button class="plink" onclick="quickToggle('${p.id}','${CUR}')">${p[STATIONS[CUR].done]?'ยกเลิก'+STATIONS[CUR].verb:STATIONS[CUR].verb}</button>
-      <button class="plink red" onclick="delP('${p.id}')"><span style="color:#2563eb;cursor:pointer;margin-right:12px" onclick="openEditModal('${p.id}')">แก้ไข</span> ลบ</button>
+      <button class="plink" type="button" onclick="event.stopPropagation();openEditModal('${p.id}')">แก้ไข</button>
+      <button class="plink red" type="button" onclick="event.stopPropagation();delP('${p.id}')">ลบ</button>
     </div>`).join('');
 }
 function emptyPeople(){return `<div class="empty"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><h3>ยังไม่มีรายชื่อ</h3><p>เพิ่มทีละคน หรือนำเข้า CSV ตามคอลัมน์: No, Emp.ID, BU, Name, Surname, Position, Function, Tel, Shirt Size, Drink, Sweet</p></div>`;}
@@ -3163,6 +3164,7 @@ applyHeader();renderDash();updateSync(false);
 
 
 function openEditModal(id){
+  if(window.event && window.event.stopPropagation) window.event.stopPropagation();
   const p=PARTS.find(x=>x.id===id);
   if(!p){toast('ไม่พบข้อมูลผู้เข้าร่วม');return;}
   document.getElementById('editId').value=p.id||'';
