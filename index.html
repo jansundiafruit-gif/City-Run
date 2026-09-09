@@ -3278,10 +3278,11 @@ function saveManualEdit(){
   const idx=PARTS.findIndex(x=>x.id===id);
   if(idx<0){toast('ไม่พบข้อมูลผู้เข้าร่วม');return;}
 
+  const original=Object.assign({},PARTS[idx]);
   const empId=document.getElementById('editEmpId').value.trim();
   if(!empId){toast('กรุณาระบุ Employee ID');return;}
 
-  const original=PARTS[idx];
+  const newGroup=document.getElementById('editGroup').value;
   const updated=Object.assign({},original,{
     id:original.id,
     qrToken:original.qrToken||original.id,
@@ -3296,28 +3297,41 @@ function saveManualEdit(){
     shirtSize:document.getElementById('editShirt').value.trim(),
     drink:document.getElementById('editDrink').value.trim(),
     sweet:document.getElementById('editSweet').value.trim(),
-    groupRunning:document.getElementById('editGroup').value
+    groupRunning:newGroup,
+    // Keep classification consistent when someone moves in/out of Working Teams.
+    note:newGroup==='Working Teams' ? 'Working Teams' :
+         (original.note==='Working Teams' ? 'Participant' : (original.note||'Participant'))
   });
 
-  PARTS[idx]=updated;
-  renderAll();
+  const applyLocal=()=>{
+    PARTS[idx]=updated;
+    saveLocal();
+    renderAll();
+  };
 
   if(CLOUD && CLOUD.on && CLOUD.ref){
-    CLOUD.ref.child('participants/'+id).set(updated)
-      .then(()=>CLOUD.ref.child('meta').update({allowManualRoster:true}))
-      .then(()=>{
+    const ref=CLOUD.ref.child('participants/'+id);
+    ref.set(updated)
+      .then(()=>ref.once('value'))
+      .then(s=>{
+        const saved=s.val();
+        if(!saved || saved.groupRunning!==newGroup){
+          throw new Error('Cloud verification failed');
+        }
+        applyLocal();
         closeEditModal();
-        toast('บันทึกแล้ว · QR เดิมยังใช้ได้');
+        toast('บันทึกแล้ว · '+(newGroup||'ไม่ระบุกลุ่ม')+' · QR เดิมยังใช้ได้');
       })
       .catch(e=>{
-        console.error(e);
-        PARTS[idx]=original;renderAll();
-        toast('Sync Cloud ไม่สำเร็จ · ยกเลิกการแก้ไข');
+        console.error('Manual edit failed',e);
+        PARTS[idx]=original;
+        renderAll();
+        toast('บันทึก Cloud ไม่สำเร็จ · ข้อมูลเดิมยังอยู่');
       });
   }else{
-    saveLocal();
+    applyLocal();
     closeEditModal();
-    toast('บันทึกข้อมูลในเครื่องแล้ว · QR เดิมยังใช้ได้');
+    toast('บันทึกในเครื่องแล้ว · '+(newGroup||'ไม่ระบุกลุ่ม'));
   }
 }
 
