@@ -2663,9 +2663,8 @@ function fmtTime(ts){if(!ts)return'';return new Date(ts).toLocaleTimeString('th-
 const CLOUD={on:false,cfg:null,code:null,db:null,ref:null,
   boot(){try{const raw=localStorage.getItem(CKEY);if(raw){const c=JSON.parse(raw);if(c&&c.cfg&&c.code)this.connect(c.cfg,c.code,true);}}catch(e){}},
   connect(cfg,code,silent,bootstrap){
-    if(typeof firebase==='undefined' || typeof firebase.database!=='function'){
-      setSyncMessage('Firebase SDK ยังไม่พร้อม',false);
-      if(!silent)toast('โหลด Firebase ไม่สำเร็จ');
+    if(typeof firebase==='undefined'){
+      if(!silent)toast('โหลด Firebase ไม่สำเร็จ (ต้องมีเน็ต)');
       return false;
     }
     try{
@@ -2679,33 +2678,25 @@ const CLOUD={on:false,cfg:null,code:null,db:null,ref:null,
         const m=s.val();
         if(m){META=Object.assign(META,m);applyHeader();}
       });
-      this.db.ref('.info/connected').on('value',s=>{
-        const connected=!!s.val();
-        updateSync(connected);
-        if(connected)setSyncMessage('ซิงค์: '+this.code,true);
-      },err=>{
-        console.error('.info/connected error',err);
-        setSyncMessage('Cloud Connection Error',false);
-      });
+      this.db.ref('.info/connected').on('value',s=>updateSync(!!s.val()));
 
       const startParticipantListener=()=>{
         this.ref.child('participants').off('value');
         this.ref.child('participants').on('value',s=>{
           const v=s.val()||{};
-          const arr=Object.keys(v).map(k=>Object.assign({},v[k],{qrToken:(v[k].qrToken||v[k].id||k)}));
+          const arr=Object.keys(v).map(k=>v[k]);
+          // Safety guard: never replace the production roster with the old 6-person demo.
           if(arr.length===6 && arr.every(p=>/^EMP00[1-6]$/.test(String(p.empId||p.id||'')))){
             console.warn('Blocked legacy 6-person demo roster');
             return;
           }
-          // Never blank a new device just because Cloud temporarily returns no roster.
           if(arr.length){
             PARTS=arr;
+            saveLocal();
             renderAll();
+          }else{
+            console.warn('Cloud roster empty; keeping bundled roster');
           }
-        },err=>{
-          console.error('Participants listener error',err);
-          setSyncMessage('Cloud Error: '+(err.code||'READ'),false);
-          toast('Cloud อ่านข้อมูลไม่ได้: '+(err.code||err.message||''));
         });
       };
 
@@ -2962,12 +2953,8 @@ function delP(id){
   const p=PARTS.find(x=>x.id===id);
   if(!p)return;
   if(!confirm('ลบ "'+fullName(p)+'" ?\n\nQR ของคนนี้จะไม่สามารถใช้งานได้หลังลบ'))return;
-  deleteParticipant(id).then(()=>{
-    toast('ลบแล้ว: '+fullName(p));
-  }).catch(e=>{
-    console.error(e);
-    toast('ลบไม่สำเร็จ · ตรวจ Firebase Rules');
-  });
+  deleteParticipant(id).then(()=>toast('ลบแล้ว: '+fullName(p)))
+    .catch(e=>{console.error(e);toast('ลบไม่สำเร็จ · ตรวจ Firebase Rules');});
 }
 
 
@@ -3148,13 +3135,6 @@ function updateSync(on){syncConnected=on;const dot=document.getElementById('sdot
   if(CLOUD.on&&on){dot.classList.add('on');txt.textContent='ซิงค์: '+CLOUD.code;}
   else if(CLOUD.on&&!on){dot.classList.remove('on');txt.textContent='กำลังเชื่อม...';}
   else{dot.classList.remove('on');txt.textContent='ออฟไลน์ (เครื่องนี้)';}}
-function setSyncMessage(msg,isOnline){
-  const dot=document.getElementById('sdot'),txt=document.getElementById('syncTxt');
-  if(!dot||!txt)return;
-  dot.classList.toggle('on',!!isOnline);
-  txt.textContent=msg;
-}
-
 function fillSettings(){document.getElementById('setName').value=META.eventName||'';}
 function saveSettings(){META.eventName=document.getElementById('setName').value.trim()||'งานวิ่งบริษัท';if(CLOUD.on)CLOUD.setName(META.eventName);else saveLocal();applyHeader();toast('บันทึกแล้ว');}
 function applyHeader(){document.getElementById('evTitle').childNodes[0].nodeValue=META.eventName||'งานวิ่งบริษัท';}
@@ -3239,121 +3219,37 @@ function wipeAll(){if(!confirm('ล้างรายชื่อทั้งห
 
 /* ---------- init ---------- */
 function seedIfEmpty(){
+  // Production build: never seed demo data.
   if(!PARTS.length){
-    PARTS=DEFAULT_PARTS.map(p=>Object.assign({},p,{qrToken:p.qrToken||p.id}));
+    PARTS=DEFAULT_PARTS.map(p=>Object.assign({},p));
     saveLocal();
   }
 }
-
-function loadExternalScript(url,timeoutMs=7000){
-  return new Promise((resolve,reject)=>{
-    const s=document.createElement('script');
-    let done=false;
-    const finish=(ok,err)=>{
-      if(done)return;done=true;
-      clearTimeout(timer);
-      if(ok)resolve(); else reject(err||new Error('โหลด script ไม่สำเร็จ'));
-    };
-    s.src=url;
-    s.async=true;
-    s.onload=()=>finish(true);
-    s.onerror=()=>finish(false,new Error('โหลด '+url+' ไม่สำเร็จ'));
-    const timer=setTimeout(()=>finish(false,new Error('timeout '+url)),timeoutMs);
-    document.head.appendChild(s);
-  });
-}
-
-async function ensureFirebaseSdk(){
-  if(typeof firebase!=='undefined' && firebase.database)return true;
-
-  setSyncMessage('กำลังโหลด Cloud…',false);
-
-  const pairs=[
-    [
-      'https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js',
-      'https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js'
-    ],
-    [
-      'https://cdn.jsdelivr.net/npm/firebase@10.12.0/firebase-app-compat.js',
-      'https://cdn.jsdelivr.net/npm/firebase@10.12.0/firebase-database-compat.js'
-    ],
-    [
-      'https://unpkg.com/firebase@10.12.0/firebase-app-compat.js',
-      'https://unpkg.com/firebase@10.12.0/firebase-database-compat.js'
-    ]
-  ];
-
-  for(const pair of pairs){
-    try{
-      if(typeof firebase==='undefined'){
-        await loadExternalScript(pair[0]);
-      }
-      if(typeof firebase!=='undefined' && !firebase.database){
-        await loadExternalScript(pair[1]);
-      }else if(typeof firebase!=='undefined'){
-        // database compat may still not be loaded
-        try{
-          if(!firebase.database) await loadExternalScript(pair[1]);
-        }catch(_){}
-      }
-      if(typeof firebase!=='undefined' && typeof firebase.database==='function'){
-        return true;
-      }
-    }catch(e){
-      console.warn('Firebase CDN fallback failed',e);
-    }
-  }
-  return (typeof firebase!=='undefined' && typeof firebase.database==='function');
-}
-
-async function autoStartCloud(){
-  // Always show the bundled roster immediately on a new device.
-  PARTS=DEFAULT_PARTS.map(p=>Object.assign({},p,{qrToken:p.qrToken||p.id}));
-  META.eventName='CBS CITY RUN';
-  renderAll();applyHeader();
-
-  const sdkReady=await ensureFirebaseSdk();
-  if(!sdkReady){
-    CLOUD.on=false;
-    setSyncMessage('Cloud โหลดไม่ได้ · กดรีเฟรช',false);
-    toast('โหลด Firebase ไม่สำเร็จ · ลอง Refresh อีกครั้ง');
-    return;
-  }
-
-  const ok=CLOUD.connect(
-    AUTO_FIREBASE_CONFIG,
-    AUTO_EVENT_CODE,
-    true,
-    {roster:DEFAULT_PARTS,version:ROSTER_VERSION,eventName:'CBS CITY RUN'}
-  );
-
-  if(!ok){
-    CLOUD.on=false;
-    setSyncMessage('Cloud เชื่อมไม่สำเร็จ',false);
-    return;
-  }
-
-  // Do not force offline after connect. Let /.info/connected control the status.
-  setSyncMessage('กำลังเชื่อม: '+AUTO_EVENT_CODE,false);
-
-  // If Safari resumes from cache/background, retry connection state.
-  document.addEventListener('visibilitychange',()=>{
-    if(document.visibilityState==='visible' && CLOUD.db){
-      try{CLOUD.db.goOnline();}catch(e){}
-    }
-  });
-
-  window.addEventListener('online',()=>{
-    try{if(CLOUD.db)CLOUD.db.goOnline();}catch(e){}
-  });
-}
-
 loadLocal();
-CUR=localStorage.getItem(SKEY)||'checkin';
-setStation(CUR);
-applyHeader();
-renderDash();
-autoStartCloud();
+PARTS=DEFAULT_PARTS.map(p=>Object.assign({},p));
+META.eventName='CBS CITY RUN';
+renderAll();
+// Always use the event name bundled with this build; an old browser cache must not rename Cloud.
+META.eventName='CBS CITY RUN';
+const autoConnected=CLOUD.connect(
+  AUTO_FIREBASE_CONFIG,
+  AUTO_EVENT_CODE,
+  true,
+  {roster:DEFAULT_PARTS,version:ROSTER_VERSION,eventName:'CBS CITY RUN'}
+);
+if(!autoConnected){
+  PARTS=DEFAULT_PARTS.map(p=>Object.assign({},p));
+  META.eventName='CBS CITY RUN';
+  saveLocal();
+}
+CUR=localStorage.getItem(SKEY)||'checkin';setStation(CUR);
+applyHeader();renderDash();
+
+
+window.addEventListener('online',()=>{try{if(CLOUD.db)CLOUD.db.goOnline();}catch(e){}});
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'){try{if(CLOUD.db)CLOUD.db.goOnline();}catch(e){}}
+});
 
 
 function openEditModal(id){
