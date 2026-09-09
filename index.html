@@ -2696,8 +2696,7 @@ const CLOUD={on:false,cfg:null,code:null,db:null,ref:null,
       };
 
       if(bootstrap&&bootstrap.roster&&bootstrap.version){
-        // Show the bundled 59-person roster immediately while Cloud is verified.
-        PARTS=bootstrap.roster.map(p=>Object.assign({},p));
+        PARTS=bootstrap.roster.map(p=>Object.assign({},p,{qrToken:p.qrToken||p.id}));
         META.eventName=bootstrap.eventName||'CBS CITY RUN';
         renderAll();applyHeader();
 
@@ -2707,59 +2706,50 @@ const CLOUD={on:false,cfg:null,code:null,db:null,ref:null,
         ]).then(([ms,ps])=>{
           const meta=ms.val()||{};
           const current=ps.val()||{};
-          const wanted=bootstrap.roster;
-          const wantedIds=new Set(wanted.map(p=>p.id));
           const currentIds=Object.keys(current);
 
-          const rosterIsExact =
-            meta.rosterVersion===bootstrap.version &&
-            currentIds.length===wanted.length &&
-            wanted.every(p=>{
-              const c=current[p.id];
-              return c &&
-                c.empId===p.empId &&
-                c.name===p.name &&
-                c.surname===p.surname &&
-                c.groupRunning===p.groupRunning;
+          const isLegacyDemo =
+            currentIds.length===6 &&
+            currentIds.every(k=>{
+              const p=current[k]||{};
+              return /^EMP00[1-6]$/.test(String(p.empId||p.id||''));
             });
 
-          if(rosterIsExact) return true;
-
-          // Build the correct roster and preserve statuses only for matching real employee IDs.
-          const merged={};
-          wanted.forEach(p=>{
-            const old=current[p.id]||{};
-            merged[p.id]=Object.assign({},p,{
-              stCheckin:!!old.stCheckin,
-              tCheckin:old.tCheckin||null,
-              stShirt:!!old.stShirt,
-              tShirt:old.tShirt||null,
-              stDrink:!!old.stDrink,
-              tDrink:old.tDrink||null
+          // Only seed when Cloud is empty or still contains the old 6-person demo.
+          // Once production roster exists, trust Cloud so manual Add/Edit/Delete remain permanent.
+          if(currentIds.length===0 || isLegacyDemo){
+            const roster={};
+            bootstrap.roster.forEach(p=>{
+              roster[p.id]=Object.assign({},p,{qrToken:p.qrToken||p.id});
             });
+            return this.ref.update({
+              participants:roster,
+              meta:Object.assign({},meta,{
+                eventName:bootstrap.eventName||'CBS CITY RUN',
+                rosterVersion:bootstrap.version,
+                rosterCount:bootstrap.roster.length,
+                production:true,
+                allowManualRoster:true
+              })
+            });
+          }
+
+          // One-time migration: ensure every existing participant has a permanent qrToken.
+          const updates={};
+          currentIds.forEach(id=>{
+            const p=current[id]||{};
+            if(!p.qrToken) updates['participants/'+id+'/qrToken']=id;
           });
-
-          // Atomic replacement of participants + metadata.
-          const payload={
-            participants:merged,
-            meta:Object.assign({},meta,{
-              eventName:bootstrap.eventName||'CBS CITY RUN',
-              rosterVersion:bootstrap.version,
-              rosterCount:wanted.length,
-              production:true
-            })
-          };
-          return this.ref.set(payload).then(()=>true);
+          updates['meta/allowManualRoster']=true;
+          return this.ref.update(updates);
         }).then(()=>{
           startParticipantListener();
-          toast('Cloud พร้อม · รายชื่อ 59 คน');
+          toast('Cloud พร้อม · Add / Edit / Delete Sync');
         }).catch(e=>{
-          console.error('Roster bootstrap failed',e);
-          // IMPORTANT: do not attach the old Cloud participant listener on failure.
-          // Keep the correct bundled 59-person roster visible instead.
-          PARTS=bootstrap.roster.map(p=>Object.assign({},p));
+          console.error('Cloud bootstrap failed',e);
+          PARTS=bootstrap.roster.map(p=>Object.assign({},p,{qrToken:p.qrToken||p.id}));
           renderAll();
-          toast('รายชื่อ 59 คนพร้อม แต่ Cloud เขียนข้อมูลไม่สำเร็จ');
+          toast('เปิดรายชื่อสำรองแล้ว แต่ Cloud ยัง Sync ไม่สำเร็จ');
         });
       }else{
         startParticipantListener();
@@ -2777,9 +2767,9 @@ const CLOUD={on:false,cfg:null,code:null,db:null,ref:null,
   },
   disconnect(){try{if(this.ref)this.ref.off();this.db&&this.db.ref('.info/connected').off();}catch(e){}
     this.on=false;localStorage.removeItem(CKEY);updateSync(false);loadLocal();renderAll();renderCloud();toast('ออกจาก Cloud แล้ว (ใช้เครื่องนี้)');},
-  writeStatus(id,st,done,time){const u={};u[STATIONS[st].done]=done;u[STATIONS[st].time]=time||null;this.ref.child('participants/'+id).update(u);},
-  writeAll(map){this.ref.child('participants').update(map);},
-  wipe(){this.ref.child('participants').remove();},
+  writeStatus(id,st,done,time){const u={};u[STATIONS[st].done]=done;u[STATIONS[st].time]=time||null;return this.ref.child('participants/'+id).update(u);},
+  writeAll(map){return this.ref.child('participants').update(map);},
+  wipe(){return this.ref.child('participants').remove();},
   resetStatuses(){const u={};PARTS.forEach(p=>{['checkin','shirt','drink'].forEach(k=>{u['participants/'+p.id+'/'+STATIONS[k].done]=false;u['participants/'+p.id+'/'+STATIONS[k].time]=null;});});this.ref.update(u);},
   setName(n){if(this.ref)this.ref.child('meta').update({eventName:n});}
 };
@@ -2795,15 +2785,63 @@ function commitStatus(p,st,done,time){
   renderAll();
 }
 function addParticipant(obj){
-  const p=Object.assign({id:uid(),stCheckin:false,tCheckin:null,stShirt:false,tShirt:null,stDrink:false,tDrink:null},obj);
-  if(CLOUD.on){const m={};m[p.id]=p;CLOUD.writeAll(m);}else{PARTS.push(p);saveLocal();renderAll();}
-  return p;
+  const newId=uid();
+  const p=Object.assign({
+    id:newId,
+    qrToken:newId,
+    stCheckin:false,tCheckin:null,
+    stShirt:false,tShirt:null,
+    stDrink:false,tDrink:null
+  },obj);
+
+  if(CLOUD.on&&CLOUD.ref){
+    return CLOUD.ref.child('participants/'+p.id).set(p).then(()=>{
+      return CLOUD.ref.child('meta').update({allowManualRoster:true});
+    }).then(()=>p);
+  }else{
+    PARTS.push(p);saveLocal();renderAll();
+    return Promise.resolve(p);
+  }
 }
 function importParticipants(list){
-  if(CLOUD.on){const m={};list.forEach(o=>{const p=Object.assign({id:uid(),stCheckin:false,tCheckin:null,stShirt:false,tShirt:null,stDrink:false,tDrink:null},o);m[p.id]=p;});CLOUD.writeAll(m);}
-  else{list.forEach(o=>PARTS.push(Object.assign({id:uid(),stCheckin:false,tCheckin:null,stShirt:false,tShirt:null,stDrink:false,tDrink:null},o)));saveLocal();renderAll();}
+  if(CLOUD.on&&CLOUD.ref){
+    const m={};
+    list.forEach(o=>{
+      const newId=uid();
+      const p=Object.assign({
+        id:newId,qrToken:newId,
+        stCheckin:false,tCheckin:null,
+        stShirt:false,tShirt:null,
+        stDrink:false,tDrink:null
+      },o);
+      m[p.id]=p;
+    });
+    return CLOUD.writeAll(m).then(()=>CLOUD.ref.child('meta').update({allowManualRoster:true}));
+  }else{
+    list.forEach(o=>{
+      const newId=uid();
+      PARTS.push(Object.assign({
+        id:newId,qrToken:newId,
+        stCheckin:false,tCheckin:null,
+        stShirt:false,tShirt:null,
+        stDrink:false,tDrink:null
+      },o));
+    });
+    saveLocal();renderAll();
+    return Promise.resolve();
+  }
 }
-function deleteParticipant(id){if(CLOUD.on)CLOUD.ref.child('participants/'+id).remove();else{PARTS=PARTS.filter(x=>x.id!==id);saveLocal();renderAll();}}
+function deleteParticipant(id){
+  if(CLOUD.on&&CLOUD.ref){
+    return CLOUD.ref.child('participants/'+id).remove().then(()=>{
+      return CLOUD.ref.child('meta').update({allowManualRoster:true});
+    });
+  }else{
+    PARTS=PARTS.filter(x=>x.id!==id);
+    saveLocal();renderAll();
+    return Promise.resolve();
+  }
+}}
 
 /* ---------- navigation ---------- */
 function go(t){
@@ -2906,21 +2944,57 @@ function renderPart(){
 }
 function emptyPeople(){return `<div class="empty"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><h3>ยังไม่มีรายชื่อ</h3><p>เพิ่มทีละคน หรือนำเข้า CSV ตามคอลัมน์: No, Emp.ID, BU, Name, Surname, Position, Function, Tel, Shirt Size, Drink, Sweet</p></div>`;}
 function quickToggle(id,st){const p=PARTS.find(x=>x.id===id);if(!p)return;const now=p[STATIONS[st].done]?false:Date.now();commitStatus(p,st,!p[STATIONS[st].done],now?now:null);toast((p[STATIONS[st].done]?STATIONS[st].verb:'ยกเลิก'+STATIONS[st].verb)+': '+fullName(p));}
-function delP(id){const p=PARTS.find(x=>x.id===id);if(!p)return;if(!confirm('ลบ "'+fullName(p)+'" ?'))return;deleteParticipant(id);}
+function delP(id){
+  const p=PARTS.find(x=>x.id===id);if(!p)return;
+  if(!confirm('ลบ "'+fullName(p)+'" ?
+
+QR ของคนนี้จะไม่สามารถใช้งานได้หลังลบ'))return;
+  deleteParticipant(id).then(()=>{
+    toast('ลบแล้ว: '+fullName(p));
+  }).catch(e=>{
+    console.error(e);toast('ลบไม่สำเร็จ · ตรวจ Firebase Rules');
+  });
+}
 
 /* ---------- Modals ---------- */
 function modal(html){document.getElementById('modalBox').innerHTML=html;document.getElementById('modalOv').classList.add('on');}
 function closeModal(){document.getElementById('modalOv').classList.remove('on');}
 function openAdd(){
-  modal(`<h2 style="font-size:20px;margin-bottom:16px">เพิ่มผู้เข้าร่วม</h2>
+  modal(`<h2 style="font-size:20px;margin-bottom:6px">เพิ่มผู้เข้าร่วม</h2>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 14px">เมื่อเพิ่มแล้ว ระบบจะสร้าง Permanent QR ให้อัตโนมัติ และ Sync ไปทุกเครื่อง</p>
     <div class="grid2"><label class="fld"><span>ชื่อ *</span><input class="inp" id="fName"></label><label class="fld"><span>นามสกุล</span><input class="inp" id="fSur"></label></div>
     <div class="grid2"><label class="fld"><span>รหัสพนักงาน</span><input class="inp" id="fEmp"></label><label class="fld"><span>BU</span><input class="inp" id="fBu"></label></div>
-    <div class="grid2"><label class="fld"><span>ไซส์เสื้อ</span><input class="inp" id="fShirt" placeholder="S / M / L / XL"></label><label class="fld"><span>เครื่องดื่ม</span><input class="inp" id="fDrink"></label></div>
-    <label class="fld"><span>ระดับความหวาน</span><input class="inp" id="fSweet" placeholder="เช่น หวานน้อย / 50%"></label>
-    <div style="display:flex;gap:10px;margin-top:6px"><button class="btn btn-ghost full btn-sm" onclick="closeModal()">ยกเลิก</button><button class="btn btn-primary full btn-sm" onclick="doAdd()">เพิ่ม</button></div>`);
+    <div class="grid2"><label class="fld"><span>Position</span><input class="inp" id="fPosition"></label><label class="fld"><span>Function</span><input class="inp" id="fFunction"></label></div>
+    <div class="grid2"><label class="fld"><span>E-Mail</span><input class="inp" id="fEmail"></label><label class="fld"><span>Mobile Phone</span><input class="inp" id="fTel"></label></div>
+    <div class="grid2"><label class="fld"><span>ไซส์เสื้อ</span><input class="inp" id="fShirt" placeholder="S / M / L / XL"></label>
+      <label class="fld"><span>Running Group</span><select class="inp" id="fGroup"><option value="">- เลือก -</option><option>Group 1</option><option>Group 2</option><option>Group 3</option><option>Working Teams</option></select></label></div>
+    <div class="grid2"><label class="fld"><span>เครื่องดื่ม</span><input class="inp" id="fDrink"></label><label class="fld"><span>ระดับความหวาน</span><input class="inp" id="fSweet"></label></div>
+    <div style="display:flex;gap:10px;margin-top:8px"><button class="btn btn-ghost full btn-sm" onclick="closeModal()">ยกเลิก</button><button class="btn btn-primary full btn-sm" onclick="doAdd()">เพิ่มและสร้าง QR</button></div>`);
   setTimeout(()=>document.getElementById('fName').focus(),50);
 }
-function doAdd(){const name=document.getElementById('fName').value.trim();if(!name){toast('กรุณากรอกชื่อ');return;}
+function doAdd(){
+  const name=document.getElementById('fName').value.trim();
+  if(!name){toast('กรุณากรอกชื่อ');return;}
+  const obj={
+    name,
+    surname:document.getElementById('fSur').value.trim(),
+    empId:document.getElementById('fEmp').value.trim(),
+    bu:document.getElementById('fBu').value.trim(),
+    position:document.getElementById('fPosition').value.trim(),
+    func:document.getElementById('fFunction').value.trim(),
+    email:document.getElementById('fEmail').value.trim(),
+    tel:document.getElementById('fTel').value.trim(),
+    shirtSize:document.getElementById('fShirt').value.trim(),
+    groupRunning:document.getElementById('fGroup').value,
+    drink:document.getElementById('fDrink').value.trim(),
+    sweet:document.getElementById('fSweet').value.trim()
+  };
+  addParticipant(obj).then(p=>{
+    closeModal();renderPart();toast('เพิ่มแล้ว · Permanent QR พร้อม: '+fullName(p));
+  }).catch(e=>{
+    console.error(e);toast('เพิ่มไม่สำเร็จ · ตรวจ Firebase Rules');
+  });
+}
   addParticipant({name,surname:document.getElementById('fSur').value.trim(),empId:document.getElementById('fEmp').value.trim(),bu:document.getElementById('fBu').value.trim(),shirtSize:document.getElementById('fShirt').value.trim(),drink:document.getElementById('fDrink').value.trim(),sweet:document.getElementById('fSweet').value.trim()});
   closeModal();renderPart();toast('เพิ่มแล้ว: '+name);}
 
@@ -2967,10 +3041,10 @@ function qrURL(code){const qr=qrcode(0,'M');qr.addData(code);qr.make();return qr
 function renderQR(){
   if(!PARTS.length){document.getElementById('qrgridWrap').innerHTML=emptyPeople();return;}
   const grid=document.createElement('div');grid.className='qrgrid';grid.id='qrgrid';
-  grid.innerHTML=PARTS.slice(0,300).map(p=>`<div class="qrcard"><img src="${qrURL('RUNCHK:'+p.id)}" alt="QR"><div class="qn">${esc(fullName(p))}</div><div class="qm">${esc(p.empId||'')}${p.groupRunning?' · '+esc(p.groupRunning):''}${p.shirtSize?' · '+esc(p.shirtSize):''}</div><div class="no-print" style="margin-top:9px"><button class="btn btn-ghost btn-sm" onclick="dlQR('${p.id}')">⬇</button></div></div>`).join('');
+  grid.innerHTML=PARTS.slice(0,300).map(p=>`<div class="qrcard"><img src="${qrURL('CRBSPERM:'+encodeURIComponent(p.qrToken||p.id))}" alt="QR"><div class="qn">${esc(fullName(p))}</div><div style="font-size:11px;color:#16a34a;font-weight:800;margin-top:2px">PERMANENT QR</div><div class="qm">${esc(p.empId||'')}${p.groupRunning?' · '+esc(p.groupRunning):''}${p.shirtSize?' · '+esc(p.shirtSize):''}</div><div class="no-print" style="margin-top:9px"><button class="btn btn-ghost btn-sm" onclick="dlQR('${p.id}')">⬇</button></div></div>`).join('');
   const w=document.getElementById('qrgridWrap');w.innerHTML='';w.appendChild(grid);
 }
-function dlQR(id){const p=PARTS.find(x=>x.id===id);if(!p)return;const qr=qrcode(0,'M');qr.addData('RUNCHK:'+p.id);qr.make();
+function dlQR(id){const p=PARTS.find(x=>x.id===id);if(!p)return;const qr=qrcode(0,'M');qr.addData('CRBSPERM:'+encodeURIComponent(p.qrToken||p.id));qr.make();
   const cv=document.createElement('canvas'),S=520,pad=40;cv.width=S;cv.height=S+72;const ctx=cv.getContext('2d');
   ctx.fillStyle='#fff';ctx.fillRect(0,0,cv.width,cv.height);const n=qr.getModuleCount(),cell=(S-pad*2)/n;ctx.fillStyle='#000';
   for(let r=0;r<n;r++)for(let c=0;c<n;c++)if(qr.isDark(r,c))ctx.fillRect(pad+c*cell,pad+r*cell,cell+.5,cell+.5);
@@ -2993,8 +3067,17 @@ function stopScan(){if(scanner&&scanning){scanner.stop().then(()=>scanner.clear(
 function onScan(text){
   const key=CUR+'|'+text,now=Date.now();
   if(scanCd[key]&&now-scanCd[key]<2500)return;scanCd[key]=now;
-  let id=text.startsWith('RUNCHK:')?text.slice(7):text.trim();
-  const p=PARTS.find(x=>x.id===id)||PARTS.find(x=>x.empId&&x.empId===id);
+  let id=text.trim();
+  let p=null;
+  if(id.startsWith('CRBSPERM:')){
+    const token=decodeURIComponent(id.slice(9));
+    p=PARTS.find(x=>(x.qrToken||x.id)===token);
+  }else if(id.startsWith('RUNCHK:')){
+    const legacy=id.slice(7);
+    p=PARTS.find(x=>x.id===legacy);
+  }else{
+    p=PARTS.find(x=>x.id===id)||PARTS.find(x=>x.empId&&x.empId===id);
+  }
   if(!p){beep('err');showResult('err',text);return;}
   if(p[STATIONS[CUR].done]){beep('dup');showResult('dup',null,p);return;}
   commitStatus(p,CUR,true,now);lastAction={id:p.id,st:CUR};beep('ok');showResult('ok',null,p);
@@ -3198,7 +3281,10 @@ function saveManualEdit(){
   const empId=document.getElementById('editEmpId').value.trim();
   if(!empId){toast('กรุณาระบุ Employee ID');return;}
 
-  const updated=Object.assign({},PARTS[idx],{
+  const original=PARTS[idx];
+  const updated=Object.assign({},original,{
+    id:original.id,
+    qrToken:original.qrToken||original.id,
     empId:empId,
     bu:document.getElementById('editBU').value.trim(),
     name:document.getElementById('editName').value.trim(),
@@ -3214,22 +3300,24 @@ function saveManualEdit(){
   });
 
   PARTS[idx]=updated;
-  saveLocal();
   renderAll();
 
   if(CLOUD && CLOUD.on && CLOUD.ref){
     CLOUD.ref.child('participants/'+id).set(updated)
+      .then(()=>CLOUD.ref.child('meta').update({allowManualRoster:true}))
       .then(()=>{
         closeEditModal();
-        toast('บันทึกข้อมูลและ Sync Cloud แล้ว');
+        toast('บันทึกแล้ว · QR เดิมยังใช้ได้');
       })
       .catch(e=>{
         console.error(e);
-        toast('บันทึกในเครื่องแล้ว แต่ Sync Cloud ไม่สำเร็จ');
+        PARTS[idx]=original;renderAll();
+        toast('Sync Cloud ไม่สำเร็จ · ยกเลิกการแก้ไข');
       });
   }else{
+    saveLocal();
     closeEditModal();
-    toast('บันทึกข้อมูลในเครื่องแล้ว');
+    toast('บันทึกข้อมูลในเครื่องแล้ว · QR เดิมยังใช้ได้');
   }
 }
 
