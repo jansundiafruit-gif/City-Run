@@ -102,6 +102,7 @@
   .group-red{background:#FFF0F0;border-color:#E5484D;color:#A30D18}
   .group-green{background:#ECFDF3;border-color:#30A46C;color:#18794E}
   .group-blue{background:#EEF6FF;border-color:#3B82F6;color:#1D4ED8}
+  .group-yellow{background:#FFFBEA;border-color:#FACC15;color:#8A6500}
   .group-gray{background:#F3F4F6;border-color:#9CA3AF;color:#374151}
   .group-badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:800;margin-left:6px}
   .group-dot{width:9px;height:9px;border-radius:50%;display:inline-block}
@@ -2849,9 +2850,9 @@ function renderDash(){
   // running groups
   const groups=['Group 1','Group 2','Group 3','Working Teams'];
   const groupMeta={
-    'Group 1':{label:'สีแดง',color:'#E5484D'},
+    'Group 1':{label:'สีฟ้า',color:'#3B82F6'},
     'Group 2':{label:'สีเขียว',color:'#30A46C'},
-    'Group 3':{label:'สีน้ำเงิน',color:'#3B82F6'},
+    'Group 3':{label:'สีเหลือง',color:'#FACC15'},
     'Working Teams':{label:'ทีมงาน',color:'#6B7280'}
   };
   document.getElementById('groupBreak').innerHTML=groups.map(gr=>{
@@ -2991,9 +2992,9 @@ function onScan(text){
 }
 function runningGroupInfo(group){
   const m={
-    'Group 1':{color:'red',thai:'สีแดง',en:'RED WRISTBAND'},
+    'Group 1':{color:'blue',thai:'สีฟ้า',en:'BLUE WRISTBAND'},
     'Group 2':{color:'green',thai:'สีเขียว',en:'GREEN WRISTBAND'},
-    'Group 3':{color:'blue',thai:'สีน้ำเงิน',en:'BLUE WRISTBAND'},
+    'Group 3':{color:'yellow',thai:'สีเหลือง',en:'YELLOW WRISTBAND'},
     'Working Teams':{color:'gray',thai:'ทีมงาน',en:'WORKING TEAM'}
   };
   return m[group]||null;
