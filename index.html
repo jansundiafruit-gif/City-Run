@@ -160,6 +160,14 @@
   .toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:12px 20px;border-radius:12px;font-weight:700;font-size:14px;opacity:0;transition:.3s;z-index:100;pointer-events:none;box-shadow:0 8px 30px rgba(0,0,0,.3)}
   .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
   @media print{.topbar,.nav,.toolbar,.no-print{display:none!important}body{padding:0;background:#fff}.qrgrid{grid-template-columns:repeat(3,1fr)}.qrcard{break-inside:avoid}}
+
+  .edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .edit-grid label{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:#475569}
+  .edit-grid .input{width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:10px 12px;font-size:14px;background:#fff;color:#0f172a}
+  .edit-grid .input:focus{outline:none;border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+  .edit-wide{grid-column:1/-1}
+  @media(max-width:640px){.edit-grid{grid-template-columns:1fr}.edit-wide{grid-column:auto}}
+
 </style>
 </head>
 <body>
@@ -2892,7 +2900,7 @@ function renderPart(){
       <div class="dots"><span class="sd checkin ${p.stCheckin?'on':''}"></span><span class="sd shirt ${p.stShirt?'on':''}"></span><span class="sd drink ${p.stDrink?'on':''}"></span></div>
       <div class="pinfo"><div class="nm">${esc(fullName(p))}</div><div class="mt">${esc(p.empId||'—')}${p.bu?' · '+esc(p.bu):''}${p.groupRunning?' · '+esc(p.groupRunning):''}${p.shirtSize?' · เสื้อ '+esc(p.shirtSize):''}${p.drink?' · '+esc(p.drink):''}</div></div>
       <button class="plink" onclick="quickToggle('${p.id}','${CUR}')">${p[STATIONS[CUR].done]?'ยกเลิก'+STATIONS[CUR].verb:STATIONS[CUR].verb}</button>
-      <button class="plink red" onclick="delP('${p.id}')">ลบ</button>
+      <button class="plink red" onclick="delP('${p.id}')"><span style="color:#2563eb;cursor:pointer;margin-right:12px" onclick="openEditModal('${p.id}')">แก้ไข</span> ลบ</button>
     </div>`).join('');
 }
 function emptyPeople(){return `<div class="empty"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><h3>ยังไม่มีรายชื่อ</h3><p>เพิ่มทีละคน หรือนำเข้า CSV ตามคอลัมน์: No, Emp.ID, BU, Name, Surname, Position, Function, Tel, Shirt Size, Drink, Sweet</p></div>`;}
@@ -3152,6 +3160,142 @@ if(!autoConnected){
 }
 CUR=localStorage.getItem(SKEY)||'checkin';setStation(CUR);
 applyHeader();renderDash();updateSync(false);
+
+
+function openEditModal(id){
+  const p=PARTS.find(x=>x.id===id);
+  if(!p){toast('ไม่พบข้อมูลผู้เข้าร่วม');return;}
+  document.getElementById('editId').value=p.id||'';
+  document.getElementById('editEmpId').value=p.empId||'';
+  document.getElementById('editBU').value=p.bu||'';
+  document.getElementById('editName').value=p.name||'';
+  document.getElementById('editSurname').value=p.surname||'';
+  document.getElementById('editPosition').value=p.position||'';
+  document.getElementById('editFunction').value=p.func||'';
+  document.getElementById('editEmail').value=p.email||'';
+  document.getElementById('editTel').value=p.tel||'';
+  document.getElementById('editShirt').value=p.shirtSize||'';
+  document.getElementById('editDrink').value=p.drink||'';
+  document.getElementById('editSweet').value=p.sweet||'';
+  document.getElementById('editGroup').value=p.groupRunning||'';
+  const m=document.getElementById('editModal');
+  m.style.display='flex';
+  m.classList.remove('hidden');
+}
+function closeEditModal(){
+  const m=document.getElementById('editModal');
+  if(!m)return;
+  m.style.display='none';
+  m.classList.add('hidden');
+}
+function saveManualEdit(){
+  const id=document.getElementById('editId').value;
+  const idx=PARTS.findIndex(x=>x.id===id);
+  if(idx<0){toast('ไม่พบข้อมูลผู้เข้าร่วม');return;}
+
+  const empId=document.getElementById('editEmpId').value.trim();
+  if(!empId){toast('กรุณาระบุ Employee ID');return;}
+
+  const updated=Object.assign({},PARTS[idx],{
+    empId:empId,
+    bu:document.getElementById('editBU').value.trim(),
+    name:document.getElementById('editName').value.trim(),
+    surname:document.getElementById('editSurname').value.trim(),
+    position:document.getElementById('editPosition').value.trim(),
+    func:document.getElementById('editFunction').value.trim(),
+    email:document.getElementById('editEmail').value.trim(),
+    tel:document.getElementById('editTel').value.trim(),
+    shirtSize:document.getElementById('editShirt').value.trim(),
+    drink:document.getElementById('editDrink').value.trim(),
+    sweet:document.getElementById('editSweet').value.trim(),
+    groupRunning:document.getElementById('editGroup').value
+  });
+
+  PARTS[idx]=updated;
+  saveLocal();
+  renderAll();
+
+  if(CLOUD && CLOUD.on && CLOUD.ref){
+    CLOUD.ref.child('participants/'+id).set(updated)
+      .then(()=>{
+        closeEditModal();
+        toast('บันทึกข้อมูลและ Sync Cloud แล้ว');
+      })
+      .catch(e=>{
+        console.error(e);
+        toast('บันทึกในเครื่องแล้ว แต่ Sync Cloud ไม่สำเร็จ');
+      });
+  }else{
+    closeEditModal();
+    toast('บันทึกข้อมูลในเครื่องแล้ว');
+  }
+}
+
 </script>
+
+<div id="editModal" class="modal hidden" style="display:none">
+  <div class="modal-card" style="max-width:720px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px">
+      <div>
+        <div style="font-size:20px;font-weight:800">แก้ไขข้อมูลผู้เข้าร่วม</div>
+        <div style="font-size:13px;color:#64748b;margin-top:3px">บันทึกแล้วข้อมูลจะ Sync ไปทุกเครื่องผ่าน Cloud</div>
+      </div>
+      <button class="btn" type="button" onclick="closeEditModal()">ปิด</button>
+    </div>
+
+    <input id="editId" type="hidden">
+
+    <div class="edit-grid">
+      <label>Employee ID
+        <input id="editEmpId" class="input" type="text">
+      </label>
+      <label>Business Unit
+        <input id="editBU" class="input" type="text">
+      </label>
+      <label>ชื่อ
+        <input id="editName" class="input" type="text">
+      </label>
+      <label>นามสกุล
+        <input id="editSurname" class="input" type="text">
+      </label>
+      <label>Position
+        <input id="editPosition" class="input" type="text">
+      </label>
+      <label>Function
+        <input id="editFunction" class="input" type="text">
+      </label>
+      <label>E-Mail
+        <input id="editEmail" class="input" type="email">
+      </label>
+      <label>Mobile Phone
+        <input id="editTel" class="input" type="text">
+      </label>
+      <label>Shirt Size
+        <input id="editShirt" class="input" type="text">
+      </label>
+      <label>Running Group
+        <select id="editGroup" class="input">
+          <option value="">- เลือก -</option>
+          <option value="Group 1">Group 1 · สีฟ้า</option>
+          <option value="Group 2">Group 2 · สีเขียว</option>
+          <option value="Group 3">Group 3 · สีเหลือง</option>
+          <option value="Working Teams">Working Teams</option>
+        </select>
+      </label>
+      <label class="edit-wide">เครื่องดื่ม
+        <input id="editDrink" class="input" type="text">
+      </label>
+      <label class="edit-wide">ความหวาน
+        <input id="editSweet" class="input" type="text">
+      </label>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px">
+      <button class="btn" type="button" onclick="closeEditModal()">ยกเลิก</button>
+      <button class="btn primary" type="button" onclick="saveManualEdit()">บันทึกข้อมูล</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
