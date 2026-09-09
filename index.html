@@ -2855,7 +2855,7 @@ function deleteParticipant(id){
     saveLocal();renderAll();
     return Promise.resolve();
   }
-}}
+}
 
 /* ---------- navigation ---------- */
 function go(t){
@@ -2959,16 +2959,17 @@ function renderPart(){
 function emptyPeople(){return `<div class="empty"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><h3>ยังไม่มีรายชื่อ</h3><p>เพิ่มทีละคน หรือนำเข้า CSV ตามคอลัมน์: No, Emp.ID, BU, Name, Surname, Position, Function, Tel, Shirt Size, Drink, Sweet</p></div>`;}
 function quickToggle(id,st){const p=PARTS.find(x=>x.id===id);if(!p)return;const now=p[STATIONS[st].done]?false:Date.now();commitStatus(p,st,!p[STATIONS[st].done],now?now:null);toast((p[STATIONS[st].done]?STATIONS[st].verb:'ยกเลิก'+STATIONS[st].verb)+': '+fullName(p));}
 function delP(id){
-  const p=PARTS.find(x=>x.id===id);if(!p)return;
-  if(!confirm('ลบ "'+fullName(p)+'" ?
-
-QR ของคนนี้จะไม่สามารถใช้งานได้หลังลบ'))return;
+  const p=PARTS.find(x=>x.id===id);
+  if(!p)return;
+  if(!confirm('ลบ "'+fullName(p)+'" ?\n\nQR ของคนนี้จะไม่สามารถใช้งานได้หลังลบ'))return;
   deleteParticipant(id).then(()=>{
     toast('ลบแล้ว: '+fullName(p));
   }).catch(e=>{
-    console.error(e);toast('ลบไม่สำเร็จ · ตรวจ Firebase Rules');
+    console.error(e);
+    toast('ลบไม่สำเร็จ · ตรวจ Firebase Rules');
   });
 }
+
 
 /* ---------- Modals ---------- */
 function modal(html){document.getElementById('modalBox').innerHTML=html;document.getElementById('modalOv').classList.add('on');}
@@ -3009,8 +3010,6 @@ function doAdd(){
     console.error(e);toast('เพิ่มไม่สำเร็จ · ตรวจ Firebase Rules');
   });
 }
-  addParticipant({name,surname:document.getElementById('fSur').value.trim(),empId:document.getElementById('fEmp').value.trim(),bu:document.getElementById('fBu').value.trim(),shirtSize:document.getElementById('fShirt').value.trim(),drink:document.getElementById('fDrink').value.trim(),sweet:document.getElementById('fSweet').value.trim()});
-  closeModal();renderPart();toast('เพิ่มแล้ว: '+name);}
 
 function openImport(){
   modal(`<h2 style="font-size:20px;margin-bottom:8px">นำเข้ารายชื่อ (CSV)</h2>
